@@ -24,3 +24,5 @@ specpulse-demo-backend/
 ```
 
 ## Env
+
+Dev/Prod
