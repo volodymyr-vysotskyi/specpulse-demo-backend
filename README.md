@@ -24,13 +24,3 @@ specpulse-demo-backend/
 ```
 
 ## Env
-
-- dev
-
-## Scripts
-
-```bash
-npm install
-npm run build
-npm test
-```
