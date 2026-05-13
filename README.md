@@ -4,6 +4,23 @@ Minimal Fastify demo service used to showcase [SpecPulse](https://github.com/vol
 
 Wired to `SPEC-membership-access` via `.github/specpulse.yml`.
 
+## Folder structure
+
+```text
+specpulse-demo-backend/
+├── .github/
+│   └── specpulse.yml
+├── src/
+│   ├── membership.ts
+│   └── server.ts
+├── tests/
+│   └── membership.test.js
+├── .gitignore
+├── package.json
+├── README.md
+└── tsconfig.json
+```
+
 ## Scripts
 
 ```bash
