@@ -21,6 +21,10 @@ specpulse-demo-backend/
 └── tsconfig.json
 ```
 
+## Env
+
+- dev
+
 ## Scripts
 
 ```bash
