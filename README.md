@@ -10,6 +10,8 @@ Wired to `SPEC-membership-access` via `.github/specpulse.yml`.
 specpulse-demo-backend/
 ├── .github/
 │   └── specpulse.yml
+├── .cursor/
+│   └── SPEC.md
 ├── src/
 │   ├── membership.ts
 │   └── server.ts
