@@ -1,29 +1,9 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import fastifyStatic from "@fastify/static";
-import Fastify, {
-  type FastifyInstance,
-  type FastifyReply,
-  type FastifyRequest,
-} from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { canAccessPaidContent } from "./membership.js";
-import { hashPassword, verifyPassword } from "./password.js";
-import {
-  createSession,
-  destroySession,
-  getUserIdForSession,
-} from "./session-store.js";
-import {
-  type PublicUser,
-  type Role,
-  toPublicUser,
-  UserStore,
-  UserStoreError,
-} from "./user-store.js";
+import { hashPassword } from "./password.js";
+import { type Role, toPublicUser, UserStore, UserStoreError } from "./user-store.js";
 
 const MIN_PASSWORD_LEN = 8;
-const SESSION_COOKIE = "sp_session";
-const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7;
 
 function parseJsonBody<T extends Record<string, unknown>>(
   body: unknown,
@@ -41,43 +21,6 @@ function parseRole(value: unknown, fallback: Role): Role {
     return value;
   }
   return fallback;
-}
-
-function parseSessionCookie(cookieHeader: string | undefined): string | undefined {
-  if (!cookieHeader) return undefined;
-  const prefix = `${SESSION_COOKIE}=`;
-  for (const segment of cookieHeader.split(";")) {
-    const trimmed = segment.trim();
-    if (!trimmed.startsWith(prefix)) continue;
-    const value = trimmed.slice(prefix.length).trim();
-    return value || undefined;
-  }
-  return undefined;
-}
-
-function setSessionCookie(reply: FastifyReply, token: string): void {
-  reply.header(
-    "Set-Cookie",
-    `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SEC}`,
-  );
-}
-
-function clearSessionCookie(reply: FastifyReply): void {
-  reply.header(
-    "Set-Cookie",
-    `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
-  );
-}
-
-function sessionUserFromRequest(
-  req: FastifyRequest,
-  userStore: UserStore,
-): PublicUser | null {
-  const token = parseSessionCookie(req.headers.cookie);
-  const userId = getUserIdForSession(token);
-  if (!userId) return null;
-  const user = userStore.getById(userId);
-  return user ? toPublicUser(user) : null;
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -124,46 +67,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       name,
       role,
     });
-    const token = createSession(user.id);
-    setSessionCookie(reply, token);
     return reply.status(201).send({ user: toPublicUser(user) });
-  });
-
-  fastify.post("/auth/login", async (req, reply) => {
-    const body = parseJsonBody<{
-      email?: unknown;
-      password?: unknown;
-    }>(req.body);
-    if (!body) {
-      return reply.status(400).send({ error: "invalid_body" });
-    }
-    const email = typeof body.email === "string" ? body.email : "";
-    const password = typeof body.password === "string" ? body.password : "";
-    if (!isValidEmail(email)) {
-      return reply.status(400).send({ error: "invalid_email" });
-    }
-    const user = userStore.findByEmail(email);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      return reply.status(401).send({ error: "invalid_credentials" });
-    }
-    const token = createSession(user.id);
-    setSessionCookie(reply, token);
-    return { user: toPublicUser(user) };
-  });
-
-  fastify.post("/auth/logout", async (req, reply) => {
-    const token = parseSessionCookie(req.headers.cookie);
-    if (token) destroySession(token);
-    clearSessionCookie(reply);
-    return reply.status(204).send();
-  });
-
-  fastify.get("/auth/me", async (req, reply) => {
-    const user = sessionUserFromRequest(req, userStore);
-    if (!user) {
-      return reply.status(401).send({ error: "unauthorized" });
-    }
-    return user;
   });
 
   fastify.get("/users", async () => {
@@ -281,13 +185,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
     userStore.delete(id);
     return reply.status(204).send();
-  });
-
-  const webRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
-  await fastify.register(fastifyStatic, {
-    root: webRoot,
-    prefix: "/app/",
-    index: "index.html",
   });
 
   return fastify;
