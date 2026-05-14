@@ -17,7 +17,6 @@ specpulse-demo-backend/
 │   ├── membership.ts
 │   ├── password.ts
 │   ├── server.ts
-│   ├── session-store.ts
 │   └── user-store.ts
 ├── tests/
 │   ├── membership.test.js
@@ -28,20 +27,17 @@ specpulse-demo-backend/
 └── tsconfig.json
 ```
 
-## Users and auth (demo)
+## Users (demo, no auth)
 
-In-memory store; restart clears data. Passwords hashed with scrypt. Bearer tokens are opaque session IDs (also in memory).
+In-memory store; restart clears data. Passwords are hashed with scrypt for storage, but **there is no authentication or authorization** on these routes (open CRUD for local demos).
 
-- `POST /auth/register` — body: `{ email, password, name }`. First registered account is **superadmin**; later ones are **user**.
-- `POST /auth/login` — `{ email, password }` → `{ token, user }`.
-- `POST /auth/logout` — `Authorization: Bearer <token>` (204).
-- `GET` / `PATCH /users/me` — authenticated user; PATCH allows `name`, `password`.
-- **Roles**: `user`, `admin`, `superadmin`. **Staff** (`admin` or `superadmin`) can use staff routes below; **superadmin** can also assign the `superadmin` role and manage `superadmin` accounts. Plain **admin** cannot change or delete a **superadmin**.
-- `GET /users` — staff: list users.
-- `GET /users/:id` — self or staff.
-- `POST /users` — staff: `{ email, password, name, role? }` where `role` is `user` | `admin` | `superadmin` (only **superadmin** may set `superadmin`).
-- `PATCH /users/:id` — self (`name`, `password`) or staff (`email`, `role`, …). Cannot demote or delete the last elevated account (sole **admin** or **superadmin**).
-- `DELETE /users/:id` — staff; cannot remove the last elevated account; **admin** cannot delete a **superadmin**.
+- `POST /auth/register` — `{ email, password, name }` → `{ user }`. First account is **superadmin**; later registrations are **user**.
+- **Roles** on users: `user`, `admin`, `superadmin` (set via `POST /users` or `PATCH /users/:id`).
+- `GET /users` — list all users.
+- `GET /users/:id` — get one user.
+- `POST /users` — `{ email, password, name, role? }`.
+- `PATCH /users/:id` — any of `email`, `name`, `password`, `role`.
+- `DELETE /users/:id` — remove user.
 
 ## Env
 

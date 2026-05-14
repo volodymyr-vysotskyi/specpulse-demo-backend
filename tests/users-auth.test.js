@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildApp } from "../dist/app.js";
 
-test("first registration becomes superadmin and can list users", async () => {
+test("first registration becomes superadmin; list users needs no auth", async () => {
   const app = await buildApp();
   const reg = await app.inject({
     method: "POST",
@@ -14,22 +14,18 @@ test("first registration becomes superadmin and can list users", async () => {
     },
   });
   assert.equal(reg.statusCode, 201);
-  const { token, user } = JSON.parse(reg.body);
+  const { user } = JSON.parse(reg.body);
   assert.equal(user.role, "superadmin");
-  assert.ok(typeof token === "string" && token.length > 0);
+  assert.equal("token" in JSON.parse(reg.body), false);
 
-  const list = await app.inject({
-    method: "GET",
-    url: "/users",
-    headers: { authorization: `Bearer ${token}` },
-  });
+  const list = await app.inject({ method: "GET", url: "/users" });
   assert.equal(list.statusCode, 200);
   const users = JSON.parse(list.body);
   assert.equal(users.length, 1);
   assert.equal(users[0].email, "admin@example.com");
 });
 
-test("second registration is user; cannot list users", async () => {
+test("any client can list users after multiple registrations", async () => {
   const app = await buildApp();
   await app.inject({
     method: "POST",
@@ -40,7 +36,7 @@ test("second registration is user; cannot list users", async () => {
       name: "A",
     },
   });
-  const reg2 = await app.inject({
+  await app.inject({
     method: "POST",
     url: "/auth/register",
     payload: {
@@ -49,44 +45,14 @@ test("second registration is user; cannot list users", async () => {
       name: "B",
     },
   });
-  assert.equal(reg2.statusCode, 201);
-  const { token } = JSON.parse(reg2.body);
-  const list = await app.inject({
-    method: "GET",
-    url: "/users",
-    headers: { authorization: `Bearer ${token}` },
-  });
-  assert.equal(list.statusCode, 403);
+  const list = await app.inject({ method: "GET", url: "/users" });
+  assert.equal(list.statusCode, 200);
+  assert.equal(JSON.parse(list.body).length, 2);
 });
 
-test("login returns token; invalid credentials rejected", async () => {
+test("register returns user; POST /users creates without auth", async () => {
   const app = await buildApp();
-  await app.inject({
-    method: "POST",
-    url: "/auth/register",
-    payload: {
-      email: "u@example.com",
-      password: "password12",
-      name: "U",
-    },
-  });
-  const ok = await app.inject({
-    method: "POST",
-    url: "/auth/login",
-    payload: { email: "u@example.com", password: "password12" },
-  });
-  assert.equal(ok.statusCode, 200);
-  const bad = await app.inject({
-    method: "POST",
-    url: "/auth/login",
-    payload: { email: "u@example.com", password: "wrongpass" },
-  });
-  assert.equal(bad.statusCode, 401);
-});
-
-test("admin can create user with role user", async () => {
-  const app = await buildApp();
-  const { token } = JSON.parse(
+  const { user } = JSON.parse(
     (
       await app.inject({
         method: "POST",
@@ -102,7 +68,6 @@ test("admin can create user with role user", async () => {
   const created = await app.inject({
     method: "POST",
     url: "/users",
-    headers: { authorization: `Bearer ${token}` },
     payload: {
       email: "child@example.com",
       password: "password12",
@@ -113,71 +78,15 @@ test("admin can create user with role user", async () => {
   assert.equal(created.statusCode, 201);
   const u = JSON.parse(created.body);
   assert.equal(u.role, "user");
+
+  const got = await app.inject({ method: "GET", url: `/users/${user.id}` });
+  assert.equal(got.statusCode, 200);
+  assert.equal(JSON.parse(got.body).email, "super@example.com");
 });
 
-test("admin cannot create superadmin; superadmin can", async () => {
+test("PATCH can change sole superadmin to user", async () => {
   const app = await buildApp();
-  const superBody = JSON.parse(
-    (
-      await app.inject({
-        method: "POST",
-        url: "/auth/register",
-        payload: {
-          email: "root@example.com",
-          password: "password12",
-          name: "Root",
-        },
-      })
-    ).body,
-  );
-  await app.inject({
-    method: "POST",
-    url: "/users",
-    headers: { authorization: `Bearer ${superBody.token}` },
-    payload: {
-      email: "mgr@example.com",
-      password: "password12",
-      name: "Mgr",
-      role: "admin",
-    },
-  });
-  const adminLogin = await app.inject({
-    method: "POST",
-    url: "/auth/login",
-    payload: { email: "mgr@example.com", password: "password12" },
-  });
-  const { token: adminToken } = JSON.parse(adminLogin.body);
-  const denied = await app.inject({
-    method: "POST",
-    url: "/users",
-    headers: { authorization: `Bearer ${adminToken}` },
-    payload: {
-      email: "sa2@example.com",
-      password: "password12",
-      name: "SA2",
-      role: "superadmin",
-    },
-  });
-  assert.equal(denied.statusCode, 403);
-
-  const ok = await app.inject({
-    method: "POST",
-    url: "/users",
-    headers: { authorization: `Bearer ${superBody.token}` },
-    payload: {
-      email: "sa2@example.com",
-      password: "password12",
-      name: "SA2",
-      role: "superadmin",
-    },
-  });
-  assert.equal(ok.statusCode, 201);
-  assert.equal(JSON.parse(ok.body).role, "superadmin");
-});
-
-test("cannot demote last elevated account", async () => {
-  const app = await buildApp();
-  const { token, user } = JSON.parse(
+  const { user } = JSON.parse(
     (
       await app.inject({
         method: "POST",
@@ -194,9 +103,8 @@ test("cannot demote last elevated account", async () => {
   const patch = await app.inject({
     method: "PATCH",
     url: `/users/${user.id}`,
-    headers: { authorization: `Bearer ${token}` },
     payload: { role: "user" },
   });
-  assert.equal(patch.statusCode, 400);
-  assert.deepEqual(JSON.parse(patch.body), { error: "last_admin" });
+  assert.equal(patch.statusCode, 200);
+  assert.equal(JSON.parse(patch.body).role, "user");
 });
