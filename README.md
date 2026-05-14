@@ -25,4 +25,4 @@ specpulse-demo-backend/
 
 ## Env
 
-Dev/Prod/Staging
+Dev/Prod/Staging/
