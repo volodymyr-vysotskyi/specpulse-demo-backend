@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from "./password.js";
 import { SessionStore } from "./session-store.js";
 import {
   type Role,
+  isElevatedRole,
   toPublicUser,
   UserStore,
   UserStoreError,
@@ -78,23 +79,33 @@ export async function buildApp(): Promise<FastifyInstance> {
     };
   }
 
-  async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
+  async function requireElevated(req: FastifyRequest, reply: FastifyReply) {
     const r = await requireAuth(req, reply);
     if (r !== undefined) return r;
-    if (req.authUser?.role !== "admin") {
+    if (!req.authUser || !isElevatedRole(req.authUser.role)) {
       return reply.status(403).send({ error: "forbidden" });
     }
   }
 
-  function assertLastAdmin(
+  /** Demoting or removing the last admin/superadmin is not allowed. */
+  function assertNotLastElevated(
     target: { id: string; role: Role },
     nextRole?: Role,
   ): void {
-    if (target.role !== "admin") return;
-    if (nextRole === undefined || nextRole === "admin") return;
-    if (userStore.adminCount() <= 1) {
+    if (!isElevatedRole(target.role)) return;
+    const staysElevated =
+      nextRole === undefined ? true : isElevatedRole(nextRole);
+    if (staysElevated) return;
+    if (userStore.elevatedCount() <= 1) {
       throw new UserStoreError("last_admin", 400);
     }
+  }
+
+  function parseRole(value: unknown, fallback: Role): Role {
+    if (value === "user" || value === "admin" || value === "superadmin") {
+      return value;
+    }
+    return fallback;
   }
 
   fastify.get("/membership/access", async () => {
@@ -122,7 +133,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     if (!name.trim()) {
       return reply.status(400).send({ error: "invalid_name" });
     }
-    const role: Role = userStore.count() === 0 ? "admin" : "user";
+    const role: Role = userStore.count() === 0 ? "superadmin" : "user";
     const user = userStore.create({
       email,
       passwordHash: hashPassword(password),
@@ -208,7 +219,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   );
 
-  fastify.get("/users", { preHandler: requireAdmin }, async () => {
+  fastify.get("/users", { preHandler: requireElevated }, async () => {
     return userStore.list();
   });
 
@@ -218,7 +229,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const actor = req.authUser!;
-      if (actor.role !== "admin" && actor.id !== id) {
+      if (!isElevatedRole(actor.role) && actor.id !== id) {
         return reply.status(403).send({ error: "forbidden" });
       }
       const user = userStore.getById(id);
@@ -231,7 +242,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   fastify.post(
     "/users",
-    { preHandler: requireAdmin },
+    { preHandler: requireElevated },
     async (req, reply) => {
       const body = parseJsonBody<{
         email?: unknown;
@@ -245,9 +256,13 @@ export async function buildApp(): Promise<FastifyInstance> {
       const email = typeof body.email === "string" ? body.email : "";
       const password = typeof body.password === "string" ? body.password : "";
       const name = typeof body.name === "string" ? body.name : "";
-      const roleRaw = body.role;
-      const role: Role =
-        roleRaw === "admin" || roleRaw === "user" ? roleRaw : "user";
+      const role = parseRole(body.role, "user");
+      if (
+        role === "superadmin" &&
+        req.authUser!.role !== "superadmin"
+      ) {
+        return reply.status(403).send({ error: "forbidden" });
+      }
       if (!isValidEmail(email)) {
         return reply.status(400).send({ error: "invalid_email" });
       }
@@ -288,13 +303,17 @@ export async function buildApp(): Promise<FastifyInstance> {
         return reply.status(400).send({ error: "invalid_body" });
       }
 
-      if (actor.role !== "admin" && actor.id !== id) {
+      if (!isElevatedRole(actor.role) && actor.id !== id) {
+        return reply.status(403).send({ error: "forbidden" });
+      }
+
+      if (actor.role === "admin" && target.role === "superadmin") {
         return reply.status(403).send({ error: "forbidden" });
       }
 
       const patch: Parameters<UserStore["update"]>[1] = {};
 
-      if (actor.role === "admin") {
+      if (isElevatedRole(actor.role)) {
         if (body.email !== undefined) {
           if (typeof body.email !== "string" || !isValidEmail(body.email)) {
             return reply.status(400).send({ error: "invalid_email" });
@@ -302,11 +321,25 @@ export async function buildApp(): Promise<FastifyInstance> {
           patch.email = body.email;
         }
         if (body.role !== undefined) {
-          if (body.role !== "admin" && body.role !== "user") {
+          if (typeof body.role !== "string") {
             return reply.status(400).send({ error: "invalid_role" });
           }
-          assertLastAdmin(target, body.role);
-          patch.role = body.role;
+          if (
+            body.role !== "user" &&
+            body.role !== "admin" &&
+            body.role !== "superadmin"
+          ) {
+            return reply.status(400).send({ error: "invalid_role" });
+          }
+          const resolvedRole = body.role as Role;
+          if (
+            resolvedRole === "superadmin" &&
+            actor.role !== "superadmin"
+          ) {
+            return reply.status(403).send({ error: "forbidden" });
+          }
+          assertNotLastElevated(target, resolvedRole);
+          patch.role = resolvedRole;
         }
       } else {
         if (body.email !== undefined || body.role !== undefined) {
@@ -341,14 +374,18 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   fastify.delete(
     "/users/:id",
-    { preHandler: requireAdmin },
+    { preHandler: requireElevated },
     async (req, reply) => {
       const { id } = req.params as { id: string };
+      const actor = req.authUser!;
       const target = userStore.getById(id);
       if (!target) {
         return reply.status(404).send({ error: "not_found" });
       }
-      if (target.role === "admin" && userStore.adminCount() <= 1) {
+      if (actor.role === "admin" && target.role === "superadmin") {
+        return reply.status(403).send({ error: "forbidden" });
+      }
+      if (isElevatedRole(target.role) && userStore.elevatedCount() <= 1) {
         return reply.status(400).send({ error: "last_admin" });
       }
       userStore.delete(id);

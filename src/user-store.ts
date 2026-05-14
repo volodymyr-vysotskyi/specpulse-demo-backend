@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-export type Role = "user" | "admin";
+export type Role = "user" | "admin" | "superadmin";
+
+export function isElevatedRole(role: Role): boolean {
+  return role === "admin" || role === "superadmin";
+}
 
 export interface User {
   id: string;
@@ -116,8 +120,9 @@ export class UserStore {
     this.byEmail.delete(user.email);
   }
 
-  adminCount(): number {
-    return [...this.byId.values()].filter((u) => u.role === "admin").length;
+  /** Accounts that can access staff APIs (admin + superadmin). */
+  elevatedCount(): number {
+    return [...this.byId.values()].filter((u) => isElevatedRole(u.role)).length;
   }
 }
 

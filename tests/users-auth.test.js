@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildApp } from "../dist/app.js";
 
-test("first registration becomes admin and can list users", async () => {
+test("first registration becomes superadmin and can list users", async () => {
   const app = await buildApp();
   const reg = await app.inject({
     method: "POST",
@@ -15,7 +15,7 @@ test("first registration becomes admin and can list users", async () => {
   });
   assert.equal(reg.statusCode, 201);
   const { token, user } = JSON.parse(reg.body);
-  assert.equal(user.role, "admin");
+  assert.equal(user.role, "superadmin");
   assert.ok(typeof token === "string" && token.length > 0);
 
   const list = await app.inject({
@@ -92,9 +92,9 @@ test("admin can create user with role user", async () => {
         method: "POST",
         url: "/auth/register",
         payload: {
-          email: "admin@example.com",
+          email: "super@example.com",
           password: "password12",
-          name: "Admin",
+          name: "Super",
         },
       })
     ).body,
@@ -115,7 +115,67 @@ test("admin can create user with role user", async () => {
   assert.equal(u.role, "user");
 });
 
-test("cannot demote last admin", async () => {
+test("admin cannot create superadmin; superadmin can", async () => {
+  const app = await buildApp();
+  const superBody = JSON.parse(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "root@example.com",
+          password: "password12",
+          name: "Root",
+        },
+      })
+    ).body,
+  );
+  await app.inject({
+    method: "POST",
+    url: "/users",
+    headers: { authorization: `Bearer ${superBody.token}` },
+    payload: {
+      email: "mgr@example.com",
+      password: "password12",
+      name: "Mgr",
+      role: "admin",
+    },
+  });
+  const adminLogin = await app.inject({
+    method: "POST",
+    url: "/auth/login",
+    payload: { email: "mgr@example.com", password: "password12" },
+  });
+  const { token: adminToken } = JSON.parse(adminLogin.body);
+  const denied = await app.inject({
+    method: "POST",
+    url: "/users",
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload: {
+      email: "sa2@example.com",
+      password: "password12",
+      name: "SA2",
+      role: "superadmin",
+    },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  const ok = await app.inject({
+    method: "POST",
+    url: "/users",
+    headers: { authorization: `Bearer ${superBody.token}` },
+    payload: {
+      email: "sa2@example.com",
+      password: "password12",
+      name: "SA2",
+      role: "superadmin",
+    },
+  });
+  assert.equal(ok.statusCode, 201);
+  assert.equal(JSON.parse(ok.body).role, "superadmin");
+});
+
+test("cannot demote last elevated account", async () => {
   const app = await buildApp();
   const { token, user } = JSON.parse(
     (
@@ -130,7 +190,7 @@ test("cannot demote last admin", async () => {
       })
     ).body,
   );
-  assert.equal(user.role, "admin");
+  assert.equal(user.role, "superadmin");
   const patch = await app.inject({
     method: "PATCH",
     url: `/users/${user.id}`,
