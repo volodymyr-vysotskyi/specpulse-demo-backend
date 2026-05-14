@@ -1,12 +1,9 @@
-import Fastify from "fastify";
-import { canAccessPaidContent } from "./membership.js";
+import { buildApp } from "./app.js";
 
-const app = Fastify();
-
-app.get("/membership/access", async () => {
-  return canAccessPaidContent({ status: "expired" });
-});
+const app = await buildApp();
 
 if (process.env.NODE_ENV !== "test") {
   await app.listen({ port: Number(process.env.PORT ?? 3001), host: "0.0.0.0" });
 }
+
+export { app };
