@@ -12,11 +12,16 @@ specpulse-demo-backend/
 │   └── specpulse.yml
 ├── .cursor/
 │   └── SPEC.md
+├── web/
+│   ├── index.html
+│   ├── app.js
+│   └── styles.css
 ├── src/
 │   ├── app.ts
 │   ├── membership.ts
 │   ├── password.ts
 │   ├── server.ts
+│   ├── session-store.ts
 │   └── user-store.ts
 ├── tests/
 │   ├── membership.test.js
@@ -27,11 +32,16 @@ specpulse-demo-backend/
 └── tsconfig.json
 ```
 
-## Users (demo, no auth)
+## Web UI (role-aware)
 
-In-memory store; restart clears data. Passwords are hashed with scrypt for storage, but **there is no authentication or authorization** on these routes (open CRUD for local demos).
+Static app is served at **`/app/`** (e.g. `http://localhost:3001/app/`). It uses hash routes (`#/dashboard`, `#/admin`), reflects **Admin** vs **Client** from server roles (`admin` / `superadmin` vs `user`), hides admin navigation for clients, and shows a plain-language page if a client opens `#/admin`. Sign-out calls `POST /auth/logout` and clears server session.
 
-- `POST /auth/register` — `{ email, password, name }` → `{ user }`. First account is **superadmin**; later registrations are **user**.
+## Users & sessions (demo)
+
+In-memory store and sessions; restart clears data. Passwords use scrypt. **`/users` CRUD remains open** (no server-side authorization on those routes); the web app only gates admin screens.
+
+- `POST /auth/register` — `{ email, password, name }` → `{ user }` and sets an **httpOnly session** cookie. First account is **superadmin**; later registrations are **user**.
+- `POST /auth/login` / `POST /auth/logout` / `GET /auth/me` — session cookie `sp_session`.
 - **Roles** on users: `user`, `admin`, `superadmin` (set via `POST /users` or `PATCH /users/:id`).
 - `GET /users` — list all users.
 - `GET /users/:id` — get one user.
