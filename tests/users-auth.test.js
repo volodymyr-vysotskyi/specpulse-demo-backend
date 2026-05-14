@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildApp } from "../dist/app.js";
 
+/** @param {{ headers: Record<string, string | string[] | undefined> }} res */
+function sessionCookie(res) {
+  const sc = res.headers["set-cookie"];
+  if (!sc) return "";
+  const line = Array.isArray(sc) ? sc[0] : String(sc);
+  return line.split(";")[0];
+}
+
 test("first registration becomes superadmin; list users needs no auth", async () => {
   const app = await buildApp();
   const reg = await app.inject({
@@ -107,4 +115,86 @@ test("PATCH can change sole superadmin to user", async () => {
   });
   assert.equal(patch.statusCode, 200);
   assert.equal(JSON.parse(patch.body).role, "user");
+});
+
+test("register issues session cookie; GET /auth/me returns user", async () => {
+  const app = await buildApp();
+  const reg = await app.inject({
+    method: "POST",
+    url: "/auth/register",
+    payload: {
+      email: "session@example.com",
+      password: "password12",
+      name: "Session",
+    },
+  });
+  assert.equal(reg.statusCode, 201);
+  const cookie = sessionCookie(reg);
+  assert.ok(cookie.startsWith("sp_session="));
+  const me = await app.inject({
+    method: "GET",
+    url: "/auth/me",
+    headers: { cookie },
+  });
+  assert.equal(me.statusCode, 200);
+  assert.equal(JSON.parse(me.body).email, "session@example.com");
+});
+
+test("POST /auth/login rejects wrong password", async () => {
+  const app = await buildApp();
+  await app.inject({
+    method: "POST",
+    url: "/auth/register",
+    payload: {
+      email: "login@example.com",
+      password: "password12",
+      name: "L",
+    },
+  });
+  const login = await app.inject({
+    method: "POST",
+    url: "/auth/login",
+    payload: { email: "login@example.com", password: "wrongpass12" },
+  });
+  assert.equal(login.statusCode, 401);
+});
+
+test("POST /auth/login sets cookie; logout invalidates session", async () => {
+  const app = await buildApp();
+  await app.inject({
+    method: "POST",
+    url: "/auth/register",
+    payload: {
+      email: "out@example.com",
+      password: "password12",
+      name: "O",
+    },
+  });
+  const login = await app.inject({
+    method: "POST",
+    url: "/auth/login",
+    payload: { email: "out@example.com", password: "password12" },
+  });
+  assert.equal(login.statusCode, 200);
+  const cookie = sessionCookie(login);
+  const okMe = await app.inject({
+    method: "GET",
+    url: "/auth/me",
+    headers: { cookie },
+  });
+  assert.equal(okMe.statusCode, 200);
+
+  const out = await app.inject({
+    method: "POST",
+    url: "/auth/logout",
+    headers: { cookie },
+  });
+  assert.equal(out.statusCode, 204);
+
+  const badMe = await app.inject({
+    method: "GET",
+    url: "/auth/me",
+    headers: { cookie },
+  });
+  assert.equal(badMe.statusCode, 401);
 });
