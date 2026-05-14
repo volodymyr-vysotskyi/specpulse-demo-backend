@@ -4,12 +4,14 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "fastify": "^5.3.3"
   },
   "devDependencies": {
+    "@types/node": "^22.15.21",
     "typescript": "^5.8.3"
   }
 }
